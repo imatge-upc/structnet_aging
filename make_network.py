@@ -13,6 +13,7 @@ def make_graphical_lasso(x, alpha=1e-3, max_iter=1000):
     np.fill_diagonal(adj, 0)
 
     src, dst = np.where(adj)
+    src, dst = src[ src != dst], dst[ src != dst] # remove self loops
     values   = adj[src, dst]
 
     edge_index  = torch.stack([torch.LongTensor(src), torch.LongTensor(dst)], dim=0)
@@ -38,9 +39,8 @@ def make_regression_lasso(x, alpha=1e-3, max_iter=1000):
     betas = np.stack(betas, axis=0)
     adj = np.sqrt( np.multiply(betas, betas.T) )
 
-    np.fill_diagonal(adj, 0)
-
     src, dst = np.where(adj)
+    src, dst = src[ src != dst], dst[ src != dst] # remove self loops
     values   = adj[src, dst]
 
     edge_index  = torch.stack([torch.LongTensor(src), torch.LongTensor(dst)], dim=0)

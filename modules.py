@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch_geometric.nn as gnn
+from torch_geometric.utils import to_dense_batch
 
 class LinearBlock(nn.Module):
     def __init__(self, in_dim, out_dim, dropout=0.0, bn=False):
@@ -15,6 +16,7 @@ class LinearBlock(nn.Module):
         return self.act( self.do( self.bn( self.lin(x) ) ) )
 
 class PermutInvGP(nn.Module):
+    """Permutation Invariant Global Pooling, concatenation of Max and Sum global pool"""
     def __init__(self):
         super(PermutInvGP, self).__init__()
 
@@ -23,6 +25,7 @@ class PermutInvGP(nn.Module):
         return x
 
 class ROIAwareGP(nn.Module):
+    """ROI-Aware Global Pooling, multiple heads of weighted sum of node representation"""
     def __init__(self, num_nodes, num_heads=1):
         super(ROIAwareGP, self).__init__()
 
@@ -44,6 +47,7 @@ class ROIAwareGP(nn.Module):
         return x
     
 class PermutEquivMP(nn.Module):
+    """Permutation Equivariang Message-Passing, GIN model"""
     def __init__(self, in_dim, 
                  hid_dim=128, num_layers=2, 
                  dropout=0.0, bn=False):
@@ -51,10 +55,10 @@ class PermutEquivMP(nn.Module):
 
         gls = list()
         gls.append( self._create_conv_layer(in_dim, hid_dim, hid_dim, 
-                                            dropout=0.0, bn=False) )
+                                            dropout=dropout, bn=bn) )
         for l in range(num_layers - 1):
             gls.append( self._create_conv_layer(hid_dim, hid_dim, hid_dim,
-                                                dropout=0.0, bn=False) )
+                                                dropout=dropout, bn=bn) )
         
         self.gls = nn.ModuleList(gls)
     
@@ -73,6 +77,7 @@ class PermutEquivMP(nn.Module):
         return x
 
 class ROIAwareMP(nn.Module):
+    """ROI-Aware Message-Passing, PointNet model"""
     def __init__(self, in_dim, num_nodes, 
                  hid_dim=128, num_layers=2, 
                  dropout=0.0, bn=False):
@@ -80,10 +85,10 @@ class ROIAwareMP(nn.Module):
 
         gls = list()
         gls.append( self._create_conv_layer(in_dim, num_nodes, hid_dim, hid_dim, 
-                                            dropout=0.0, bn=False) )
+                                            dropout=dropout, bn=bn) )
         for l in range(num_layers - 1):
             gls.append( self._create_conv_layer(hid_dim, num_nodes, hid_dim, hid_dim, 
-                                                dropout=0.0, bn=False) )
+                                                dropout=dropout, bn=bn) )
         
         self.gls = nn.ModuleList(gls)
 
@@ -107,6 +112,7 @@ class ROIAwareMP(nn.Module):
 
     
 class GNN(nn.Module):
+    """GNN model: message-passing + global-pooling + FCNN"""
     def __init__(self, in_dim, num_nodes, 
                         msgp="RA", gpool="RA",
                         gnn_hid_dim=128, gnn_num_layers=2,
@@ -115,8 +121,8 @@ class GNN(nn.Module):
         assert msgp  in ["RA","PE"], "Message Passing must be either RA (ROI-aware) or PE (Permutation Equivariant)"
         assert gpool in ["RA","PI"], "Global Pooling must be either RA (ROI-aware) or PI (Permutation Invariant)"
 
-        self.msgp  = msgp
-        self.gpool = gpool
+        self.msgp_mode  = msgp
+        self.gpool_mode = gpool
 
         if msgp == "RA":
             self.msgp = ROIAwareMP(in_dim, num_nodes, 
@@ -136,13 +142,17 @@ class GNN(nn.Module):
             LinearBlock(2 * gnn_hid_dim, gnn_hid_dim, dropout=dropout, bn=bn),
             nn.Linear(gnn_hid_dim, 1)
         )
+
+        print(self)
     
     def forward(self, data):
         # message-passing
-        if self.msgp == "RA":
+        if self.msgp_mode == "RA":
             x = self.msgp(data.x, data.pos, data.edge_index)
-        else:
+        elif self.msgp_mode == "PE":
             x = self.msgp(data.x, data.edge_index)
+        else:
+            raise Exception("Invalid mspg")
 
         # global pooling
         x = self.gpool(x, data.batch)
@@ -153,6 +163,7 @@ class GNN(nn.Module):
         return x
 
 class FCNN(nn.Module):
+    """FCNN model"""
     def __init__(self, in_dim, 
                  hid_dim=128, num_layers=2, 
                  dropout=0.0, bn=False):
